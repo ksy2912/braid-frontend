@@ -11,6 +11,13 @@ export interface PeriodStat {
   period: number;
   blockCount: number;
   npv: number;
+  tons?: number;
+  capacity?: number;
+  dest0Tons?: number;
+  dest1Tons?: number;
+  dest0Capacity?: number;
+  dest1Capacity?: number;
+  capacityLimit?: number;
 }
 
 export interface SolverResult {
@@ -21,11 +28,12 @@ export interface SolverResult {
   blockCount: number;
   output: BraidOutput;
   totalNpv: number;
+  totalTons?: number;
+  totalCapacity?: number;
+  capacityLimitsByPeriod?: number[];
   periodStats: PeriodStat[];
   destinationSplit: { ore: number; waste: number };
   fileNames: { pcpsp: string; prec: string };
   engine: string;
-  
-  // NEW OPTIONAL FIELD: Maps Block ID directly to its Spatial Coordinates
   coordinates?: Record<number, BlockCoordinate>;
 }

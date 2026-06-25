@@ -1,156 +1,106 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Loader2, Server, Shield } from 'lucide-react';
+import { AlertCircle, BarChart3, FileJson, Loader2, FolderOpen } from 'lucide-react';
 import { PageHeader } from '../components/layout/PageHeader';
 import { StepNav } from '../components/layout/StepNav';
-import { DropZone } from '../components/upload/DropZone';
 import { useAppContext } from '../context/AppContext';
-import { checkBackendHealth, solveWithBackend } from '../lib/api/solveApi';
-import type { BlockCoordinate } from '../types/solver';
-
-// Clean parser returning the spatial layout matrix
-function parseBlocksFile(fileText: string): Record<number, BlockCoordinate> {
-  const coordinatesMap: Record<number, BlockCoordinate> = {};
-  const lines = fileText.split(/\r?\n/);
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || line.startsWith('#')) continue;
-
-    const columns = line.split(/\s+/);
-
-    if (columns.length >= 4) {
-      const id = parseInt(columns[0], 10);
-      const x = parseFloat(columns[1]);
-      const y = parseFloat(columns[2]);
-      const z = parseFloat(columns[3]);
-
-      if (!isNaN(id) && !isNaN(x) && !isNaN(y) && !isNaN(z)) {
-        coordinatesMap[id] = { id, x, y, z };
-      }
-    }
-  }
-  return coordinatesMap;
-}
+import { loadVerificationDataset, VERIFICATION_DATASET } from '../lib/dataset';
 
 export function UploadPage() {
   const navigate = useNavigate();
   const { setSolverResult } = useAppContext();
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [backendReady, setBackendReady] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    checkBackendHealth().then(setBackendReady);
-  }, []);
-
-  const handlePairSelected = useCallback(
-    async (pcpsp: File, prec: File, coordsFile?: File) => {
-      if (!backendReady) {
-        setError('Python backend is not running. Start it with: npm run dev:backend');
-        return;
-      }
-
-      setError(null);
-      setIsProcessing(true);
-      
-      try {
-        const result = await solveWithBackend(pcpsp, prec);
-
-        if (coordsFile) {
-          const reader = new FileReader();
-
-          reader.onload = (event) => {
-            const rawText = event.target?.result as string;
-            const coordinatesMap = parseBlocksFile(rawText);
-
-            setSolverResult({
-              ...result,
-              coordinates: coordinatesMap,
-            });
-            navigate('/results');
-          };
-
-          reader.onerror = () => {
-            setError('Failed reading .blocks column mappings.');
-            setIsProcessing(false);
-          };
-
-          reader.readAsText(coordsFile);
-        } else {
-          setSolverResult(result);
-          navigate('/results');
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? `${err.message} — start backend: npm run dev:backend`
-            : 'Optimization failed'
-        );
-        setIsProcessing(false);
-      }
-    },
-    [navigate, setSolverResult, backendReady]
-  );
+  const handleLoadDataset = useCallback(() => {
+    setError(null);
+    setIsProcessing(true);
+    try {
+      const result = loadVerificationDataset();
+      setSolverResult(result);
+      navigate('/results');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load verification dataset');
+      setIsProcessing(false);
+    }
+  }, [navigate, setSolverResult]);
 
   return (
     <div className="min-h-screen bg-app">
       <PageHeader
-        title="Mine Schedule Optimizer"
-        subtitle="Upload your PCPSP model and PREC precedence file to generate an optimized block schedule."
+        title="Frontend Verification"
+        subtitle="Load manager solution JSON from dataset/ and render analytics charts (no Python backend)."
         step={1}
         totalSteps={2}
       />
       <StepNav currentStep={1} />
 
       <main className="page-shell w-full py-10">
-        <div className="space-y-6">
-          {backendReady === false && (
-            <div className="panel flex items-start gap-3 border-amber-200 bg-amber-50/50 p-5">
-              <Server className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-              <div>
-                <p className="font-semibold text-amber-900">Backend not connected</p>
-                <p className="mt-1 text-sm text-amber-800">
-                  Run <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">npm run dev:backend</code> in a
-                  separate terminal, then refresh this page.
-                </p>
-              </div>
-            </div>
-          )}
+        <div className="mx-auto max-w-2xl space-y-6">
           {error && (
             <div className="panel flex items-start gap-3 border-red-200 bg-red-50/50 p-5">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-red-900">Processing failed</p>
+                <p className="font-semibold text-red-900">Load failed</p>
                 <p className="mt-1 text-sm text-red-700">{error}</p>
               </div>
             </div>
           )}
 
-          <DropZone onPairSelected={handlePairSelected} isProcessing={isProcessing} />
-
-          {isProcessing && (
-            <div className="panel-elevated flex items-center justify-center gap-3 p-8">
-              <Loader2 className="h-5 w-5 animate-spin text-[var(--navy)]" />
-              <p className="font-medium text-[var(--text-primary)]">Running optimization…</p>
+          <div className="panel-elevated p-8">
+            <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--navy)] text-white">
+              <FolderOpen className="h-6 w-6" />
             </div>
-          )}
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              {VERIFICATION_DATASET.label} verification bundle
+            </h2>
+            <p className="mt-2 text-sm text-[var(--text-muted)]">
+              Schedule comes from the manager&apos;s JSON output. PCPSP file supplies limits, masses, and
+              objective values for chart aggregation only — <strong>main.py is not run</strong>.
+            </p>
+
+            <ul className="mt-5 space-y-2 font-mono text-xs text-[var(--text-muted)]">
+              <li className="flex items-center gap-2">
+                <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.solution}
+              </li>
+              <li className="flex items-center gap-2">
+                <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.pcpsp}
+              </li>
+              <li className="flex items-center gap-2">
+                <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.prec}
+              </li>
+            </ul>
+
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={handleLoadDataset}
+              className="btn-primary mt-8 inline-flex w-full items-center justify-center gap-2 px-6 py-3 text-sm"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading charts…
+                </>
+              ) : (
+                <>
+                  <BarChart3 className="h-4 w-4" /> Load dataset &amp; view charts
+                </>
+              )}
+            </button>
+          </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="panel p-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Input</p>
-              <p className="mt-1 text-sm font-semibold">.pcpsp + .prec + (opt) .blocks</p>
+              <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Schedule source</p>
+              <p className="mt-1 text-sm font-semibold">Manager JSON</p>
             </div>
             <div className="panel p-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Engine</p>
-              <p className="mt-1 text-sm font-semibold">SimpleMineScheduler</p>
+              <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Metadata source</p>
+              <p className="mt-1 text-sm font-semibold">PCPSP file</p>
             </div>
-            <div className="panel flex items-start gap-2 p-4">
-              <Shield className="mt-0.5 h-4 w-4 text-[var(--copper)]" />
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Output</p>
-                <p className="mt-1 text-sm font-semibold">Schedule JSON + analytics</p>
-              </div>
+            <div className="panel p-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Backend</p>
+              <p className="mt-1 text-sm font-semibold">Not required</p>
             </div>
           </div>
         </div>

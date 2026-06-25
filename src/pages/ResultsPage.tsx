@@ -4,11 +4,9 @@ import {
   ArrowLeft,
   RotateCcw,
   TrendingUp,
-  Layers,
   Calendar,
   Percent,
   Activity,
-  Target,
   Box,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/PageHeader';
@@ -17,7 +15,7 @@ import { AnalyticsDashboard } from '../components/results/AnalyticsDashboard';
 import { OutputJsonPanel } from '../components/results/OutputJsonPanel';
 import { BlockViewer } from '../components/results/BlockViewer'; // Imports our new 3D system
 import { useAppContext } from '../context/AppContext';
-import { buildPeriodRows, summaryInsights } from '../lib/analytics/chartData';
+import { buildPeriodRows, summaryInsights, fmtTons } from '../lib/analytics/chartData';
 
 function KpiCard({
   label,
@@ -69,34 +67,18 @@ export function ResultsPage() {
   const {
     name,
     totalNpv,
-    blockCount,
     periods,
     discountRate,
     output,
     fileNames,
-    destinationSplit,
+    engine,
   } = solverResult;
-
-  const correctedDestinationSplit = {
-    ore: destinationSplit.waste,  
-    waste: destinationSplit.ore,  
-  };
-
-  const correctedInsights = {
-    ...insights,
-    orePct: parseFloat(((correctedDestinationSplit.ore / blockCount) * 100).toFixed(1))
-  };
-
-  const correctedSolverResult = {
-    ...solverResult,
-    destinationSplit: correctedDestinationSplit
-  };
 
   return (
     <div className="min-h-screen bg-app">
       <PageHeader
         title={name || 'Mine schedule'}
-        subtitle={`${fileNames.pcpsp} · ${fileNames.prec}`}
+        subtitle={`${fileNames.pcpsp} · ${fileNames.prec} · ${engine}`}
         step={2}
         totalSteps={2}
       />
@@ -106,7 +88,7 @@ export function ResultsPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-xs text-[var(--text-muted)]">
-              Peak load: {insights.peakPeriod} ({insights.peakBlocks.toLocaleString()} blocks)
+              Peak capacity: {insights.peakPeriod} ({fmtTons(insights.peakCapacity)})
             </span>
             
             {/* Conditional Slicing Controller UI — Only renders if optional coordinates exist */}
@@ -143,23 +125,16 @@ export function ResultsPage() {
               <Box className="h-4 w-4 text-[var(--copper)]" />
               <h3 className="text-sm font-bold text-[var(--text-primary)]">3D Open-Pit Block Model Spatializer</h3>
             </div>
-            <BlockViewer result={correctedSolverResult} selectedPeriod={activePeriodFilter} />
+            <BlockViewer result={solverResult} selectedPeriod={activePeriodFilter} />
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <KpiCard
             label="Total NPV"
             value={`$${totalNpv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             sub="Discounted mine value"
             icon={TrendingUp}
-          />
-          <KpiCard
-            label="Blocks scheduled"
-            value={blockCount.toLocaleString()}
-            sub={`Avg ${insights.avgBlocks.toLocaleString()} per period`}
-            icon={Layers}
-            variant="copper"
           />
           <KpiCard
             label="Planning horizon"
@@ -168,16 +143,9 @@ export function ResultsPage() {
             icon={Calendar}
             variant="slate"
           />
-          <KpiCard
-            label="Ore routing"
-            value={`${correctedInsights.orePct}%`}
-            sub={`${correctedDestinationSplit.ore.toLocaleString()} ore · ${correctedDestinationSplit.waste.toLocaleString()} waste`}
-            icon={Target}
-            variant="green"
-          />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="panel flex items-center gap-4 p-4">
             <Activity className="h-8 w-8 text-[var(--navy)]" />
             <div>
@@ -192,16 +160,9 @@ export function ResultsPage() {
               <p className="text-lg font-semibold">{output.length.toLocaleString()}</p>
             </div>
           </div>
-          <div className="panel flex items-center gap-4 p-4">
-            <TrendingUp className="h-8 w-8 text-[var(--green)]" />
-            <div>
-              <p className="text-xs text-[var(--text-muted)]">Peak throughput</p>
-              <p className="text-lg font-semibold">{insights.peakBlocks.toLocaleString()} blocks</p>
-            </div>
-          </div>
         </div>
 
-        <AnalyticsDashboard result={correctedSolverResult} rows={rows} />
+        <AnalyticsDashboard result={solverResult} rows={rows} />
 
         <OutputJsonPanel output={output} fileName={`${name || 'schedule'}_output.json`} />
       </main>

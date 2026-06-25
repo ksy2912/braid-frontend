@@ -8,8 +8,8 @@ class Block:
     id: int
     profit_ore: float = 0.0
     profit_waste: float = 0.0
-    mass_dest0: float = 0.0  # Initialized to 0.0 to track true presence
-    mass_dest1: float = 0.0  # Initialized to 0.0 to track true presence
+    mass_dest0: float = 0.0  
+    mass_dest1: float = 0.0  
 
     @property
     def profit(self):
@@ -27,6 +27,7 @@ class SimpleMineScheduler:
         self.discount = 0.1
         self.mined_time = {}
         self.schedule = defaultdict(list)
+        self.resource_limits: dict[int, float] = {}  # Keyed by constraint_id/period
 
     def _load_prec_lines(self, lines):
         for line in lines:
@@ -56,6 +57,7 @@ class SimpleMineScheduler:
     def _load_pcpsp_lines(self, lines):
         reading_obj = False
         reading_coefficients = False
+        reading_limits = False
 
         for raw_line in lines:
             line = raw_line.strip().replace(":", " ")
@@ -80,14 +82,22 @@ class SimpleMineScheduler:
             elif "OBJECTIVE_FUNCTION" in key:
                 reading_obj = True
                 reading_coefficients = False
+                reading_limits = False
                 continue
             elif "RESOURCE_CONSTRAINT_COEFFICIENTS" in key:
                 reading_obj = False
                 reading_coefficients = True
+                reading_limits = False
                 continue
-            elif any(k in key for k in ["RESOURCE_CONSTRAINT_LIMITS", "NAME", "TYPE"]):
+            elif "RESOURCE_CONSTRAINT_LIMITS" in key:
                 reading_obj = False
                 reading_coefficients = False
+                reading_limits = True
+                continue
+            elif any(k in key for k in ["NAME", "TYPE"]):
+                reading_obj = False
+                reading_coefficients = False
+                reading_limits = False
                 continue
 
             if reading_obj and len(parts) >= 3:
@@ -109,14 +119,33 @@ class SimpleMineScheduler:
                     coeff_val = float(parts[3])
 
                     if b_id in self.blocks:
-                        # Only capture positive coefficients to prevent resetting back to 0 or intermediate lines
-                        if coeff_val > 0:
-                            if dest_id == 0:
-                                self.blocks[b_id].mass_dest0 = max(self.blocks[b_id].mass_dest0, coeff_val)
-                            elif dest_id == 1:
-                                self.blocks[b_id].mass_dest1 = max(self.blocks[b_id].mass_dest1, coeff_val)
+                        if dest_id == 0:
+                            self.blocks[b_id].mass_dest0 = max(self.blocks[b_id].mass_dest0, coeff_val)
+                        elif dest_id == 1:
+                            self.blocks[b_id].mass_dest1 = max(self.blocks[b_id].mass_dest1, coeff_val)
                 except ValueError:
                     continue
+
+            # 🟢 FIX: Handle both 2-column standard layout and multi-column limit rows safely
+            elif reading_limits and len(parts) >= 2:
+                try:
+                    constraint_id = int(parts[0])
+                    # If it's a simple layout, parts[1] is the limit value. If it's complex, look for type markers.
+                    if len(parts) == 2:
+                        self.resource_limits[constraint_id] = float(parts[1])
+                    elif len(parts) >= 4:
+                        period = int(parts[1])
+                        constraint_type = parts[2].upper()
+                        if constraint_type == "L":
+                            self.resource_limits[period] = float(parts[3])
+                        elif constraint_type == "I" and len(parts) >= 5:
+                            self.resource_limits[period] = float(parts[4])
+                except ValueError:
+                    continue
+
+    def _capacity_limit_for_period(self, period: int) -> float:
+        # Match against constraint IDs directly or by matching period indices
+        return self.resource_limits.get(period, 60000000.0)
 
     def load_pcpsp(self, file):
         with open(file, encoding="utf-8") as f:
@@ -169,23 +198,43 @@ class SimpleMineScheduler:
             
             block_value = max(block.profit_ore, block.profit_waste)
 
-            # Fallback handling at backend layer to avoid 0 values from unparsed edges
-            m0 = block.mass_dest0 if block.mass_dest0 > 0 else 71550.0
-            m1 = block.mass_dest1 if block.mass_dest1 > 0 else 71550.0
-
+            # 🟢 FIX: Send the exact raw unrounded weights directly without any hardcoded 71550 overrides
             output.append(
                 {
                     "block_id": b, 
                     "destination": dest, 
                     "time_period": t,
                     "value": float(block_value),
-                    "mass_dest0": float(m0),
-                    "mass_dest1": float(m1)
+                    "mass_dest0": float(block.mass_dest0),
+                    "mass_dest1": float(block.mass_dest1)
                 }
             )
 
         period_stats = []
         total_npv = 0.0
+        period_tons = defaultdict(float)
+        period_capacity = defaultdict(float)
+        period_dest0_tons = defaultdict(float)
+        period_dest1_tons = defaultdict(float)
+
+        for row in output:
+            t = row["time_period"]
+            dest = row["destination"]
+            m0 = row["mass_dest0"]
+            m1 = row["mass_dest1"]
+            
+            # Pure mathematical accumulation based on real destination paths
+            mass = m0 if dest == 0 else m1
+
+            period_tons[t] += mass
+            period_capacity[t] += mass
+            if dest == 0:
+                period_dest0_tons[t] += m0
+            else:
+                period_dest1_tons[t] += m1
+
+        total_tons = sum(period_tons.values())
+        total_capacity = sum(period_capacity.values())
 
         for t in sorted(self.schedule.keys()):
             period_blocks = self.schedule[t]
@@ -203,8 +252,17 @@ class SimpleMineScheduler:
                     "period": t,
                     "blockCount": len(period_blocks),
                     "npv": period_npv,
+                    "tons": period_tons[t],
+                    "capacity": period_capacity[t],
+                    "oreTons": period_dest0_tons[t],
+                    "wasteTons": period_dest1_tons[t],
+                    "capacityLimit": self._capacity_limit_for_period(t),
                 }
             )
+
+        capacity_limits_by_period = [
+            self._capacity_limit_for_period(t) for t in range(self.T)
+        ]
 
         return {
             "name": self.name,
@@ -214,6 +272,9 @@ class SimpleMineScheduler:
             "blockCount": len(self.blocks),
             "output": output,
             "totalNpv": total_npv,
+            "totalTons": total_tons,
+            "totalCapacity": total_capacity,
+            "capacityLimitsByPeriod": capacity_limits_by_period,
             "periodStats": period_stats,
             "destinationSplit": {"ore": ore_count, "waste": waste_count},
         }
