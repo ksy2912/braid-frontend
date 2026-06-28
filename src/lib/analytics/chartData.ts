@@ -1,178 +1,101 @@
-import type { BraidOutput, BraidOutputRow } from '../../types/braid';
+import type { BraidOutput } from '../../types/braid';
 import type { SolverResult } from '../../types/solver';
 
 export interface PeriodRow {
   period: string;
   periodNum: number;
   blocks: number;
-  tons: number;
-  capacity: number;
+  /** Resource 0 consumption this period (scheduled routing) */
+  res0Tons: number;
+  /** Resource 1 consumption this period (scheduled routing) */
+  res1Tons: number;
+  /** Resource 0 routed to destination 0 (dest-0 path coeff) */
   dest0Tons: number;
+  /** Resource 0 routed to destination 1 (dest-1 path coeff) */
   dest1Tons: number;
-  dest0Capacity: number;
-  dest1Capacity: number;
-  capacityLimit: number;
-  capacityUtilPct: number;
+  resourceUsed: number[];
+  resourceLimits: number[];
+  resourceUtilPct: number[];
   npv: number;
   cumulativeNpv: number;
   ore: number;
   waste: number;
-  oreTons: number;
-  wasteTons: number;
-  oreCapacity: number;
-  wasteCapacity: number;
   npvShare: number;
-  utilization: number;
-}
-
-function blockMass(row: BraidOutputRow): number {
-  const m0 = row.mass_dest0 ?? 0;
-  const m1 = row.mass_dest1 ?? 0;
-  return row.destination === 0 ? m0 : m1;
 }
 
 export function buildPeriodRows(result: SolverResult): PeriodRow[] {
-  const outputMetrics = new Map<
-    number,
-    {
-      tons: number;
-      capacity: number;
-      dest0Tons: number;
-      dest1Tons: number;
-      dest0Capacity: number;
-      dest1Capacity: number;
-    }
-  >();
+  const destByPeriod = new Map<number, { ore: number; waste: number }>();
 
   for (const row of result.output) {
-    const bucket = outputMetrics.get(row.time_period) ?? {
-      tons: 0,
-      capacity: 0,
-      dest0Tons: 0,
-      dest1Tons: 0,
-      dest0Capacity: 0,
-      dest1Capacity: 0,
-    };
-    const mass = blockMass(row);
-    bucket.tons += mass;
-    bucket.capacity += mass;
-    if (row.destination === 0) {
-      bucket.dest0Tons += row.mass_dest0 ?? 0;
-      bucket.dest0Capacity += row.mass_dest0 ?? 0;
-    } else {
-      bucket.dest1Tons += row.mass_dest1 ?? 0;
-      bucket.dest1Capacity += row.mass_dest1 ?? 0;
-    }
-    outputMetrics.set(row.time_period, bucket);
-  }
-
-  const destByPeriod = new Map<number, { ore: number; waste: number; oreTons: number; wasteTons: number; oreCapacity: number; wasteCapacity: number }>();
-
-  for (const row of result.output) {
-    const bucket = destByPeriod.get(row.time_period) ?? {
-      ore: 0,
-      waste: 0,
-      oreTons: 0,
-      wasteTons: 0,
-      oreCapacity: 0,
-      wasteCapacity: 0,
-    };
-    if (row.destination === 0) {
-      bucket.ore += 1;
-      bucket.oreTons += row.mass_dest0 ?? 0;
-      bucket.oreCapacity += row.mass_dest0 ?? 0;
-    } else {
-      bucket.waste += 1;
-      bucket.wasteTons += row.mass_dest1 ?? 0;
-      bucket.wasteCapacity += row.mass_dest1 ?? 0;
-    }
+    const bucket = destByPeriod.get(row.time_period) ?? { ore: 0, waste: 0 };
+    if (row.destination === 0) bucket.ore += 1;
+    else bucket.waste += 1;
     destByPeriod.set(row.time_period, bucket);
   }
 
-  const maxCapacity = Math.max(
-    ...result.periodStats.map((p) => p.capacity ?? outputMetrics.get(p.period)?.capacity ?? 0),
-    1,
-  );
   let cumulative = 0;
 
   return result.periodStats.map((p) => {
     cumulative += p.npv;
-    const computed = outputMetrics.get(p.period);
-    const dest = destByPeriod.get(p.period) ?? {
-      ore: 0,
-      waste: 0,
-      oreTons: 0,
-      wasteTons: 0,
-      oreCapacity: 0,
-      wasteCapacity: 0,
-    };
-    const tons = p.tons ?? computed?.tons ?? 0;
-    const capacity = p.capacity ?? computed?.capacity ?? 0;
-    const dest0Tons = p.dest0Tons ?? computed?.dest0Tons ?? 0;
-    const dest1Tons = p.dest1Tons ?? computed?.dest1Tons ?? 0;
-    const dest0Capacity = p.dest0Capacity ?? computed?.dest0Capacity ?? 0;
-    const dest1Capacity = p.dest1Capacity ?? computed?.dest1Capacity ?? 0;
-    const limit =
-      p.capacityLimit ??
-      result.capacityLimitsByPeriod?.[p.period] ??
-      0;
-    const capacityUtilPct = limit > 0 ? Math.round((capacity / limit) * 100) : Math.round((capacity / maxCapacity) * 100);
+    const dest = destByPeriod.get(p.period) ?? { ore: 0, waste: 0 };
+    const resourceUtilPct = p.resourceUsed.map((used, r) => {
+      const limit = p.resourceLimits[r] ?? 0;
+      return limit > 0 ? Math.round((used / limit) * 100) : 0;
+    });
 
     return {
       period: `P${p.period}`,
       periodNum: p.period,
       blocks: p.blockCount,
-      tons,
-      capacity,
-      dest0Tons,
-      dest1Tons,
-      dest0Capacity,
-      dest1Capacity,
-      capacityLimit: limit,
-      capacityUtilPct,
+      res0Tons: p.resourceUsed[0] ?? 0,
+      res1Tons: p.resourceUsed[1] ?? 0,
+      dest0Tons: p.dest0Tons,
+      dest1Tons: p.dest1Tons,
+      resourceUsed: p.resourceUsed,
+      resourceLimits: p.resourceLimits,
+      resourceUtilPct,
       npv: p.npv,
       cumulativeNpv: cumulative,
       ore: dest.ore,
       waste: dest.waste,
-      oreTons: dest.oreTons,
-      wasteTons: dest.wasteTons,
-      oreCapacity: dest.oreCapacity,
-      wasteCapacity: dest.wasteCapacity,
       npvShare: result.totalNpv ? (p.npv / result.totalNpv) * 100 : 0,
-      utilization: capacityUtilPct,
     };
   });
 }
 
-export function periodDistribution(output: BraidOutput, periods: number) {
-  const counts = Array.from({ length: periods }, (_, i) => ({
-    period: `P${i}`,
+export function periodDistribution(output: BraidOutput, activePeriods: number[]) {
+  const counts = activePeriods.map((p) => ({
+    period: `P${p}`,
     count: 0,
   }));
+  const indexByPeriod = new Map(activePeriods.map((p, i) => [p, i]));
   for (const row of output) {
-    if (row.time_period < counts.length) counts[row.time_period].count += 1;
+    const idx = indexByPeriod.get(row.time_period);
+    if (idx !== undefined) counts[idx].count += 1;
   }
   return counts;
 }
 
 export function summaryInsights(rows: PeriodRow[], result: SolverResult) {
-  const peakCapacity = rows.reduce((a, b) => (b.capacity > a.capacity ? b : a), rows[0]);
-  const peakTons = rows.reduce((a, b) => (b.tons > a.tons ? b : a), rows[0]);
+  const peakResource = rows.reduce(
+    (best, row) => {
+      const maxUsed = Math.max(...row.resourceUsed, 0);
+      return maxUsed > best.peakUsed ? { period: row.period, peakUsed: maxUsed } : best;
+    },
+    { period: '—', peakUsed: 0 }
+  );
+  const peakTons = rows.reduce((a, b) => (b.res0Tons > a.res0Tons ? b : a), rows[0]);
   const topNpv = rows.reduce((a, b) => (b.npv > a.npv ? b : a), rows[0]);
   const totalOre = rows.reduce((sum, row) => sum + row.ore, 0);
   const orePct = result.blockCount ? ((totalOre / result.blockCount) * 100).toFixed(1) : '0';
 
   return {
-    peakPeriod: peakCapacity?.period ?? '—',
-    peakBlocks: peakCapacity?.blocks ?? 0,
-    peakTons: peakTons?.tons ?? 0,
-    peakCapacity: peakCapacity?.capacity ?? 0,
-    peakDest1Capacity: rows.reduce((max, row) => Math.max(max, row.dest1Capacity), 0),
+    peakPeriod: peakResource.period,
+    peakResourceUsed: peakResource.peakUsed,
+    peakTons: peakTons?.res0Tons ?? 0,
     topNpvPeriod: topNpv?.period ?? '—',
     orePct,
-    avgBlocks: rows.length ? Math.round(result.blockCount / rows.length) : 0,
-    avgTons: rows.length ? Math.round((result.totalTons ?? rows.reduce((s, r) => s + r.tons, 0)) / rows.length) : 0,
-    avgCapacity: rows.length ? Math.round((result.totalCapacity ?? rows.reduce((s, r) => s + r.capacity, 0)) / rows.length) : 0,
+    avgTons: rows.length ? Math.round(result.totalTons / rows.length) : 0,
   };
 }
 

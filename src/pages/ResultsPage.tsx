@@ -88,25 +88,26 @@ export function ResultsPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-xs text-[var(--text-muted)]">
-              Peak capacity: {insights.peakPeriod} ({fmtTons(insights.peakCapacity)})
+              Peak resource use: {insights.peakPeriod} ({fmtTons(insights.peakResourceUsed)})
             </span>
-            
-            {/* Conditional Slicing Controller UI — Only renders if optional coordinates exist */}
-            {solverResult.coordinates && (
-              <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
-                <label className="text-xs font-medium text-[var(--text-muted)]">3D View Target:</label>
-                <select 
-                  value={activePeriodFilter}
-                  onChange={(e) => setActivePeriodFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className="rounded-md border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-2 py-1 text-xs font-semibold focus:outline-none"
-                >
-                  <option value="all">Entire Pit Structure</option>
-                  {rows.map((r, i) => (
-                    <option key={i} value={r.periodNum}>Period {r.periodNum}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+              <label className="text-xs font-medium text-[var(--text-muted)]">3D pit view:</label>
+              <select
+                value={activePeriodFilter}
+                onChange={(e) =>
+                  setActivePeriodFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
+                }
+                className="rounded-md border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-2 py-1 text-xs font-semibold focus:outline-none"
+              >
+                <option value="all">Entire pit structure</option>
+                {rows.map((r) => (
+                  <option key={r.periodNum} value={r.periodNum}>
+                    Period {r.periodNum}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={() => { setSolverResult(null); navigate('/'); }} className="btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm">
@@ -118,16 +119,21 @@ export function ResultsPage() {
           </div>
         </div>
 
-        {/* Optional 3D Voxel Engine Canvas Viewport Integration */}
-        {solverResult.coordinates && (
-          <div className="panel p-5 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-xl animate-fade-up">
-            <div className="flex items-center gap-2 mb-4">
-              <Box className="h-4 w-4 text-[var(--copper)]" />
-              <h3 className="text-sm font-bold text-[var(--text-primary)]">3D Open-Pit Block Model Spatializer</h3>
-            </div>
-            <BlockViewer result={solverResult} selectedPeriod={activePeriodFilter} />
+        <div className="panel p-5 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-xl animate-fade-up">
+          <div className="flex items-center gap-2 mb-4">
+            <Box className="h-4 w-4 text-[var(--copper)]" />
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">3D open-pit block model</h3>
+            <span className="text-xs text-[var(--text-muted)]">Coordinates from {fileNames.blocks}</span>
           </div>
-        )}
+          {solverResult.coordinates ? (
+            <BlockViewer result={solverResult} selectedPeriod={activePeriodFilter} />
+          ) : (
+            <p className="text-sm text-[var(--text-muted)]">
+              No block coordinates found. Add <code className="font-mono text-xs">{fileNames.blocks}</code> with
+              lines: <code className="font-mono text-xs">block_id x y z</code>
+            </p>
+          )}
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <KpiCard
@@ -139,7 +145,7 @@ export function ResultsPage() {
           <KpiCard
             label="Planning horizon"
             value={`${periods} periods`}
-            sub={`Best NPV in ${insights.topNpvPeriod}`}
+            sub={`P${solverResult.activePeriods[0]}–P${solverResult.activePeriods[solverResult.activePeriods.length - 1]} · Best NPV ${insights.topNpvPeriod}`}
             icon={Calendar}
             variant="slate"
           />

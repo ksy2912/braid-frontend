@@ -10,6 +10,11 @@ declare module '*.prec?raw' {
   export default content;
 }
 
+declare module '*.txt?raw' {
+  const content: string;
+  export default content;
+}
+
 declare module '../../../dataset/*.json' {
   const value: unknown;
   export default value;

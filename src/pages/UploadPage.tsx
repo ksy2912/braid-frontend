@@ -67,6 +67,9 @@ export function UploadPage() {
                 <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.pcpsp}
               </li>
               <li className="flex items-center gap-2">
+                <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.blocks}
+              </li>
+              <li className="flex items-center gap-2">
                 <FileJson className="h-3.5 w-3.5" /> dataset/{VERIFICATION_DATASET.prec}
               </li>
             </ul>
